@@ -30,7 +30,6 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/.env .env || true
 
 # Expose port 8080 (or adjust based on your service port)
 EXPOSE 8080
