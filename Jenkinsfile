@@ -1,63 +1,107 @@
 pipeline {
-  agent any
+    agent any
 
-  parameters {
-    string(name: 'TAG_NAME', defaultValue: 'latest', description: 'Docker image tag to push (e.g. tagname)')
-  }
+    environment {
+        AWS_REGION      = 'ap-south-1'
+        AWS_ACCOUNT_ID  = '772706200970'
+        ECR_REPOSITORY  = 'patient-service'
+        ECS_CLUSTER     = 'hospital-microservices-cluster'
+        ECS_SERVICE     = 'patient-service'
 
-  environment {
-    DOCKER_IMAGE = "patientservic:${BUILD_NUMBER}"
-    DOCKER_REGISTRY = 'docker.io'
-    DOCKER_REPO = 'vikash3117/patientservic'
-    REPO_URL = 'https://github.com/vikashsum/patientservic.git'
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        echo '====== Checking out repository ======'
-        git branch: 'main', url: "${REPO_URL}"
-      }
+        IMAGE_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest"
     }
 
-    stage('Build') {
-      steps {
-        echo '====== Building Docker image ======'
-        sh 'docker build -t ${DOCKER_IMAGE} .'
-        sh 'docker images | grep patientservic'
-      }
-    }
+    stages {
 
-    stage('Push') {
-      steps {
-        echo '====== Pushing to Docker Hub ======'
-        script {
-          withCredentials([usernamePassword(credentialsId: 'docker-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-            sh '''
-              echo "Logging into Docker Hub..."
-              echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-              
-              echo "Tagging image..."
-              IMAGE=${DOCKER_REPO}:${TAG_NAME}
-              docker tag ${DOCKER_IMAGE} ${IMAGE}
-
-              echo "Pushing image to Docker Hub..."
-              docker push ${IMAGE}
-
-              echo "Image pushed successfully: ${IMAGE}"
-            '''
-          }
+        stage('Checkout') {
+            steps {
+                echo "Checking out source code..."
+                git branch: 'main',
+                    url: 'https://github.com/vikashsum/patientservic.git'
+            }
         }
-      }
-    }
-  }
 
-  post {
-    success {
-      echo '✅ patientservic pipeline completed successfully'
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image..."
+                sh """
+                docker build -t ${IMAGE_URI} .
+                """
+            }
+        }
+
+        stage('Login to Amazon ECR') {
+            steps {
+                echo "Logging into Amazon ECR..."
+                sh """
+                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                """
+            }
+        }
+
+        stage('Push Image to ECR') {
+            steps {
+                echo "Pushing image to ECR..."
+                sh """
+                docker push ${IMAGE_URI}
+                """
+            }
+        }
+
+        stage('Deploy to ECS') {
+            steps {
+                echo "Deploying to ECS..."
+                sh """
+                aws ecs update-service \
+                  --cluster ${ECS_CLUSTER} \
+                  --service ${ECS_SERVICE} \
+                  --force-new-deployment \
+                  --region ${AWS_REGION}
+                """
+            }
+        }
+
+        stage('Wait for Deployment') {
+            steps {
+                echo "Waiting for ECS deployment..."
+                sh """
+                aws ecs wait services-stable \
+                  --cluster ${ECS_CLUSTER} \
+                  --services ${ECS_SERVICE} \
+                  --region ${AWS_REGION}
+                """
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh """
+                aws ecs describe-services \
+                  --cluster ${ECS_CLUSTER} \
+                  --services ${ECS_SERVICE} \
+                  --region ${AWS_REGION}
+                """
+            }
+        }
     }
-    failure {
-      echo '❌ patientservic pipeline failed'
+
+    post {
+        success {
+            echo "========================================"
+            echo "Deployment Successful"
+            echo "Patient Service is updated in ECS."
+            echo "========================================"
+        }
+
+        failure {
+            echo "========================================"
+            echo "Deployment Failed"
+            echo "Check Jenkins console output."
+            echo "========================================"
+        }
+
+        always {
+            sh "docker image prune -f || true"
+        }
     }
-  }
 }
