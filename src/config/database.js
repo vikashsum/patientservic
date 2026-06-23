@@ -6,10 +6,18 @@ const sequelize = new Sequelize(
   config.database.username,
   config.database.password,
   {
-    host: config.database.host,
-    port: config.database.port,
-    dialect: config.database.dialect,
-    logging: config.app.nodeEnv === 'development' ? console.log : false,
+  host: config.database.host,
+  port: config.database.port,
+  dialect: config.database.dialect,
+
+  dialectOptions: {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false
+    }
+  },
+
+  logging: config.app.nodeEnv === 'development' ? console.log : false,
     pool: {
       max: 5,
       min: 0,
